@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent-Bando</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Agent-Bando: SOC Assistant</h1>
+        <form method="POST">
+            <input type="text" name="query" placeholder="Enter query (e.g., CVE-2023-1234 or Apache CVEs)" required>
+            <button type="submit">Search</button>
+        </form>
+
+        {% if error %}
+            <p class="error">{{ error }}</p>
+        {% endif %}
+
+        {% if summary %}
+            <h2>Summary</h2>
+            <p>{{ summary }}</p>
+        {% endif %}
+
+        {% if results %}
+            <h2>Results</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Description</th>
+                        <th>Severity</th>
+                        <th>Impact</th>
+                        <th>Published/Tactic</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for result in results %}
+                        <tr>
+                            <td>{{ result.cve_id if result.cve_id else result.id }}</td>
+                            <td>{{ result.description }}</td>
+                            <td class="{% if result.severity == 'CRITICAL' %}severity-critical
+                                       {% elif result.severity == 'HIGH' %}severity-high
+                                       {% elif result.severity == 'MEDIUM' %}severity-medium
+                                       {% elif result.severity == 'LOW' %}severity-low
+                                       {% else %}severity-na{% endif %}">
+                                {{ result.severity if result.severity else 'N/A' }}
+                            </td>
+                            <td class="{% if result.impact|float >= 8.0 %}impact-high
+                                       {% elif result.impact|float >= 6.0 %}impact-moderate
+                                       {% elif result.impact|float >= 3.0 %}impact-low
+                                       {% elif result.impact|float > 0 %}impact-very-low
+                                       {% else %}impact-na{% endif %}">
+                                {{ result.impact if result.impact else 'N/A' }}
+                            </td>
+                            <td>{{ result.published if result.published else result.tactic }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </div>
+</body>
+</html>

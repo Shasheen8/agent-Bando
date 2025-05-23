@@ -1,87 +1,182 @@
-import re
-from together import Together
-from data_sources.nist import NIST
-from data_sources.mitre import MITRE
-from utils.config import CONFIG
+from dataclasses import dataclass
+from typing import List, Dict, Any
 from utils.logger import log_info, log_error
+from together import Together
+import os
+from dotenv import load_dotenv
+import json
+import re
+
+load_dotenv()
+
+@dataclass
+class Result:
+    cve_id: str
+    description: str
+    severity: str
+    impact: float
+    exploitability: float
+    exploit_available: str
+    published: str
+    affected: List[str]
+    references: List[str]
+    mitre_techniques: List[Dict[str, str]]
 
 class AgentBando:
     def __init__(self):
-        self.client = Together(api_key=CONFIG["together_api_key"])
-        self.nist = NIST()
-        self.mitre = MITRE()
+        self.client = Together(api_key=os.getenv("TOGETHER_API_KEY"))
 
-    def process_query(self, user_query):
-        log_info(f"Processing query: {user_query}")
-        query_lower = user_query.lower()
-        results = []
-        context_data = {}
+    def process_query(self, query: str) -> Dict[str, Any]:
+        log_info(f"Processing query: {query}")
+        try:
+            # Simplified prompt focusing on JSON, with minimal Markdown
+            prompt = f"""
+For CVE ID {query}, provide a response in two parts, separated by '---':
 
-        # Parse query for CVE or MITRE technique
-        cve_match = re.search(r'CVE-\d{4}-\d{4,7}', query_lower, re.IGNORECASE)
-        technique_match = re.search(r'T\d{4}', query_lower)
-        keyword = self._extract_keyword(query_lower)
+1. **Summary**: A brief Markdown summary with:
+   - Description, attack vector, mitigation
+   - Severity (CVSS score, exploit availability)
+   - Affected products (up to 10)
+   - MITRE ATT&CK techniques
+   Use bullet points.
 
-        if cve_match:
-            cve_id = cve_match.group(0).upper()  # Normalize to uppercase
-            log_info(f"Detected CVE: {cve_id}")
-            context_data = self.nist.get_cve(cve_id)
-            if "error" not in context_data:
-                results.append(context_data)
-        elif technique_match:
-            technique_id = technique_match.group(0)
-            log_info(f"Detected MITRE technique: {technique_id}")
-            context_data = self.mitre.get_technique(technique_id)
-            if "error" not in context_data:
-                results.append(context_data)
-        elif keyword:
-            log_info(f"Detected keyword: {keyword}")
-            context_data = self.nist.search_cve(keyword)
-            if not isinstance(context_data, dict) or "error" not in context_data:
-                results.extend(context_data)
+2. **Table Data**: A valid JSON object with:
+   - cve_id: string
+   - description: string
+   - severity: string (CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN)
+   - impact: float (CVSS score, 0.0-10.0)
+   - exploitability: float (0.0-10.0)
+   - exploit_available: string (Yes/No)
+   - published: string (YYYY-MM-DD or Unknown)
+   - affected: array of strings (product names, max 10)
+   - references: array of URLs
+   - mitre_techniques: array of {{id, name}}
 
-        # Handle no results
-        if not results:
-            log_error(f"No results for query: {user_query}")
-            return {"error": "No results found or invalid query"}
+Wrap JSON in ```json ```. If data is unavailable, use defaults and note in summary.
 
-        # Summarize with LLM
-        context_str = self._format_context(results)
-        log_info(f"Context for LLM: {context_str}")
-        response = self.client.chat.completions.create(
-            model="togethercomputer/Refuel-Llm-V2-Small",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are Agent-Bando, a SOC assistant. Summarize security data concisely."
-                },
-                {
-                    "role": "user",
-                    "content": f"Query: {user_query}\nContext: {context_str}\nSummarize in a clear, actionable way."
+Example:
+## {query} Summary
+- **Description**: Example vulnerability...
+- **Attack Vector**: Remote...
+- **Severity**: CVSS 8.1, exploits available
+- **Affected**: Product A, Product B
+- **MITRE**: T1190
+---
+```json
+{{
+    "cve_id": "{query}",
+    "description": "Example vulnerability...",
+    "severity": "HIGH",
+    "impact": 8.1,
+    "exploitability": 2.8,
+    "exploit_available": "Yes",
+    "published": "2024-07-01",
+    "affected": ["Product A", "Product B"],
+    "references": ["https://nvd.nist.gov/vuln/detail/{query}"],
+    "mitre_techniques": [
+        {{"id": "T1190", "name": "Exploit Public-Facing Application"}}
+    ]
+}}
+```
+"""
+            try:
+                response = self.client.completions.create(
+                    model="deepseek-ai/DeepSeek-V3",
+                    prompt=prompt,
+                    max_tokens=1000,
+                    temperature=0.5  # Lower temperature for consistency
+                )
+                response_text = response.choices[0].text.strip()
+                log_info(f"Full API response: {response_text}")
+
+                # Split response
+                try:
+                    summary, json_data = response_text.split("---", 1)
+                    summary = summary.strip()
+                    json_data = json_data.strip()
+                except ValueError:
+                    log_error("No '---' separator found in response")
+                    raise ValueError("Invalid response format")
+
+                # Extract JSON
+                json_match = re.search(r"```json\s*([\s\S]*?)\s*```", json_data, re.MULTILINE)
+                if json_match:
+                    json_str = json_match.group(1).strip()
+                else:
+                    log_error("No JSON block found")
+                    raise ValueError("No JSON block")
+
+                # Parse JSON
+                try:
+                    table_data = json.loads(json_str)
+                    log_info(f"Parsed table data: {table_data}")
+                except json.JSONDecodeError as e:
+                    log_error(f"JSON parsing failed: {str(e)}")
+                    raise
+
+                # Validate and normalize data
+                nist_data = {
+                    "cve_id": table_data.get("cve_id", query),
+                    "description": table_data.get("description", f"Details for {query} unavailable"),
+                    "severity": table_data.get("severity", "UNKNOWN").upper(),
+                    "impact": float(table_data.get("impact", 0.0)),
+                    "exploitability": float(table_data.get("exploitability", 0.0)),
+                    "exploit_available": table_data.get("exploit_available", "No"),
+                    "published": table_data.get("published", "Unknown"),
+                    "affected": table_data.get("affected", []) if isinstance(table_data.get("affected"), list) else [],
+                    "references": table_data.get("references", [f"https://nvd.nist.gov/vuln/detail/{query}"]) if isinstance(table_data.get("references"), list) else [f"https://nvd.nist.gov/vuln/detail/{query}"]
                 }
-            ]
-        )
-        summary = response.choices[0].message.content
-        log_info(f"LLM summary: {summary}")
-        return {"results": results, "summary": summary}
+                mitre_data = table_data.get("mitre_techniques", []) if isinstance(table_data.get("mitre_techniques"), list) else []
 
-    def _extract_keyword(self, query):
-        stop_words = {"for", "in", "on", "latest", "show"}
-        words = query.lower().split()
-        return next((w for w in words if w not in stop_words and not re.match(r'CVE-\d{4}-\d{4,7}|T\d{4}', w, re.IGNORECASE)), None)
+                # Ensure summary is non-empty
+                if not summary.strip().startswith("##"):
+                    log_error("Summary is incomplete")
+                    summary = f"## {query} Summary\n- **Description**: {nist_data['description']}\n- **Attack Vector**: Unknown\n- **Severity**: {nist_data['severity']}\n- **Affected**: {', '.join(nist_data['affected'])}"
 
-    def _format_context(self, results):
-        formatted = []
-        for item in results:
-            if "cve_id" in item:
-                formatted.append(
-                    f"CVE: {item['cve_id']}, Description: {item['description']}, "
-                    f"Severity: {item['severity']}, Impact: {item['impact']}, "
-                    f"Published: {item['published']}"
-                )
-            else:
-                formatted.append(
-                    f"Technique: {item['id']}, Name: {item['name']}, "
-                    f"Description: {item['description']}, Tactic: {item['tactic']}"
-                )
-        return "\n".join(formatted)
+            except Exception as e:
+                log_error(f"LLM query or parsing failed: {str(e)}")
+                # Fallback with minimal data
+                nist_data = {
+                    "cve_id": query,
+                    "description": f"Vulnerability details for {query} unavailable",
+                    "severity": "UNKNOWN",
+                    "impact": 0.0,
+                    "exploitability": 0.0,
+                    "exploit_available": "No",
+                    "published": "Unknown",
+                    "affected": [],
+                    "references": [f"https://nvd.nist.gov/vuln/detail/{query}"]
+                }
+                mitre_data = []
+                summary = f"""## {query} Summary
+- **Description**: Limited information available for {query}.
+- **Attack Vector**: Unknown.
+- **Severity**: Unknown; check NVD.
+- **Affected**: None identified.
+- **MITRE**: None identified.
+- **Mitigation**: Monitor NVD or vendor advisories.
+- **Note**: Comprehensive details missing. Visit https://nvd.nist.gov/vuln/detail/{query}.
+"""
+
+            results = [Result(
+                cve_id=nist_data["cve_id"],
+                description=nist_data["description"],
+                severity=nist_data["severity"],
+                impact=nist_data["impact"],
+                exploitability=nist_data["exploitability"],
+                exploit_available=nist_data["exploit_available"],
+                published=nist_data["published"],
+                affected=nist_data["affected"],
+                references=nist_data["references"],
+                mitre_techniques=mitre_data
+            )]
+
+            return {"results": results, "summary": summary}
+        except Exception as e:
+            log_error(f"Error processing query: {str(e)}")
+            return {"error": f"Failed to process query: {str(e)}"}
+
+if __name__ == "__main__":
+    agent = AgentBando()
+    response = agent.process_query("CVE-2024-6387")
+    print(response)

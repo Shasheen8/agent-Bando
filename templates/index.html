@@ -5,34 +5,63 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agent-Bando</title>
     <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+    <script src="https://unpkg.com/@popperjs/core@2"></script>
+    <script src="https://unpkg.com/tippy.js@6"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="container">
-        <h1>Agent-Bando: SOC Assistant</h1>
-        <form method="POST">
+        <div class="header">
+            <h1>Agent-Bando: SOC Assistant</h1>
+            <button id="dark-mode-toggle">Toggle Dark Mode</button>
+        </div>
+        <form method="POST" id="query-form">
             <input type="text" name="query" placeholder="Enter query (e.g., CVE-2023-1234 or Apache CVEs)" required>
             <button type="submit">Search</button>
         </form>
+        <div id="loading" style="display: none; text-align: center;">
+            <div class="spinner"></div>
+            <p>Loading...</p>
+        </div>
 
         {% if error %}
             <p class="error">{{ error }}</p>
         {% endif %}
 
-        {% if summary %}
+        {% if summary_html %}
             <h2>Summary</h2>
-            <p>{{ summary }}</p>
+            <div class="summary">{{ summary_html | safe }}</div>
         {% endif %}
 
         {% if results %}
             <h2>Results</h2>
-            <table>
+            <div class="filters">
+                <label for="severity-filter">Filter by Severity:</label>
+                <select id="severity-filter">
+                    <option value="">All</option>
+                    <option value="CRITICAL">Critical</option>
+                    <option value="HIGH">High</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="LOW">Low</option>
+                </select>
+                <button id="export-csv">Export to CSV</button>
+            </div>
+            <table id="results-table" class="display">
                 <thead>
                     <tr>
                         <th>ID</th>
                         <th>Description</th>
                         <th>Severity</th>
                         <th>Impact</th>
+                        <th>Exploitability</th>
+                        <th>Exploit Available</th>
                         <th>Published/Tactic</th>
+                        <th>Affected</th>
+                        <th>MITRE Techniques</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -54,12 +83,112 @@
                                        {% else %}impact-na{% endif %}">
                                 {{ result.impact if result.impact else 'N/A' }}
                             </td>
+                            <td>{{ result.exploitability if result.exploitability else 'N/A' }}</td>
+                            <td class="{% if result.exploit_available == 'Yes' %}exploit-yes
+                                       {% else %}exploit-no{% endif %}">
+                                {{ result.exploit_available if result.exploit_available else 'No' }}
+                            </td>
                             <td>{{ result.published if result.published else result.tactic }}</td>
+                            <td data-tippy-content="<ul>{% for item in result.affected %}<li>{{ item }}</li>{% endfor %}</ul>">
+                                {{ result.affected[:3]|join(', ') }}{% if result.affected|length > 3 %}...{% endif %}
+                            </td>
+                            <td>
+                                {% if result.mitre_techniques %}
+                                    {% for technique in result.mitre_techniques %}
+                                        {{ technique.id }}: {{ technique.name }}{% if not loop.last %}, {% endif %}
+                                    {% endfor %}
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </td>
                         </tr>
                     {% endfor %}
                 </tbody>
             </table>
+            <h2>Severity Trend</h2>
+            <canvas id="severity-chart" width="400" height="200"></canvas>
         {% endif %}
     </div>
+    <script>
+        $(document).ready(function() {
+            const table = $('#results-table').DataTable({
+                dom: 'Bfrtip',
+                buttons: [
+                    {
+                        text: 'Export CSV',
+                        action: function() {
+                            let csvContent = "ID,Description,Severity,Impact,Exploitability,Exploit Available,Published/Tactic,Affected,MITRE Techniques\n";
+                            $('#results-table tbody tr').each(function() {
+                                let row = [];
+                                $(this).find('td').each(function() {
+                                    row.push('"' + $(this).text().replace(/"/g, '""') + '"');
+                                });
+                                csvContent += row.join(',') + '\n';
+                            });
+                            const blob = new Blob([csvContent], { type: 'text/csv' });
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.setAttribute('href', url);
+                            a.setAttribute('download', 'agent_bando_results.csv');
+                            a.click();
+                        }
+                    }
+                ]
+            });
+
+            $('#severity-filter').on('change', function() {
+                table.column(2).search(this.value).draw();
+            });
+
+            tippy('td[data-tippy-content]', {
+                content(reference) {
+                    return reference.getAttribute('data-tippy-content');
+                },
+                allowHTML: true,
+                maxWidth: 300
+            });
+
+            $('#query-form').on('submit', function() {
+                $('#loading').show();
+            });
+
+            $('#dark-mode-toggle').on('click', function() {
+                $('body').toggleClass('dark-mode');
+                localStorage.setItem('darkMode', $('body').hasClass('dark-mode') ? 'enabled' : 'disabled');
+            });
+            if (localStorage.getItem('darkMode') === 'enabled') {
+                $('body').addClass('dark-mode');
+            }
+
+            {% if results %}
+                const severities = {
+                    CRITICAL: 0,
+                    HIGH: 0,
+                    MEDIUM: 0,
+                    LOW: 0,
+                    'N/A': 0
+                };
+                {% for result in results %}
+                    severities['{{ result.severity if result.severity else 'N/A' }}']++;
+                {% endfor %}
+                new Chart(document.getElementById('severity-chart'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['Critical', 'High', 'Medium', 'Low', 'N/A'],
+                        datasets: [{
+                            label: 'Severity Distribution',
+                            data: [severities.CRITICAL, severities.HIGH, severities.MEDIUM, severities.LOW, severities['N/A']],
+                            backgroundColor: ['#ff4d4d', '#ff9900', '#ffeb3b', '#4caf50', '#d3d3d3']
+                        }]
+                    },
+                    options: {
+                        scales: {
+                            y: { beginAtZero: true, title: { display: true, text: 'Count' } }
+                        }
+                    }
+                });
+            {% endif %}
+        });
+    </script>
 </body>
 </html>

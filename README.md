@@ -133,7 +133,7 @@ agent-bando/
   - Reinstall:
     ```bash
     pip install together==1.4.6 python-dotenv==0.19.0 flask==2.2.5 markdown==3.4.1
-    ```.
+    ```
 
 ## License
 

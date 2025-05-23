@@ -5,7 +5,7 @@ Agent-Bando is a super lightweight, chat-based Security Operations Center (SOC) 
 ## Features
 - **Query Vulnerabilities**: Fetch details for specific CVEs (e.g., `CVE-2023-41064`) or search by keywords (e.g., `Apache`).
 - **Color-Coded Table**: Displays CVE ID, description, severity, impact, and publication date with visual cues (e.g., red for Critical severity).
-- **LLM Summaries**: Generates clear, actionable summaries using Together AI's `togethercomputer/Refuel-Llm-V2-Small` $0.20 per 1 million tokens
+- **LLM Summaries**: Generates clear, actionable summaries using Together AI's `deepseek-ai/DeepSeek-V3` $0.20 per 1 million tokens
 - **Lightweight & Extensible**: Modular design for easy integration of additional data sources (e.g., MITRE ATT&CK).
 - **Rate-Limit Friendly**: Handles NIST API limits with delays, no API key required for basic use.
 

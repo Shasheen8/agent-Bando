@@ -29,16 +29,21 @@ class AgentBando:
     def process_query(self, query: str) -> Dict[str, Any]:
         log_info(f"Processing query: {query}")
         try:
-            # Simplified prompt focusing on JSON, with minimal Markdown
+            # Simplified prompt with explicit field requirements
             prompt = f"""
 For CVE ID {query}, provide a response in two parts, separated by '---':
 
-1. **Summary**: A brief Markdown summary with:
-   - Description, attack vector, mitigation
-   - Severity (CVSS score, exploit availability)
-   - Affected products (up to 10)
-   - MITRE ATT&CK techniques
-   Use bullet points.
+1. **Summary**: A complete Markdown summary with the following sections:
+   - **Description**: Vulnerability details, attack vector, mitigation
+   - **Severity**: CVSS score, exploit availability
+   - **Affected**: Up to 10 affected products/vendors
+   - **MITRE ATT&CK**: Relevant techniques
+   - **Threat Actors**: Known actors or exploitation status
+   - **Bug Bounty**: Bounty details if available
+   - **Recent News**: News or industry impact
+   - **Next Steps**: SOC team actions
+   - **Missing Data**: Note any gaps
+   Use bullet points for each section.
 
 2. **Table Data**: A valid JSON object with:
    - cve_id: string
@@ -52,15 +57,19 @@ For CVE ID {query}, provide a response in two parts, separated by '---':
    - references: array of URLs
    - mitre_techniques: array of {{id, name}}
 
-Wrap JSON in ```json ```. If data is unavailable, use defaults and note in summary.
+Wrap JSON in ```json ```. Ensure all fields are included, using defaults if data is unavailable.
 
 Example:
 ## {query} Summary
-- **Description**: Example vulnerability...
-- **Attack Vector**: Remote...
-- **Severity**: CVSS 8.1, exploits available
+- **Description**: Example vulnerability... Attack vector: Remote. Mitigation: Patch.
+- **Severity**: CVSS 8.1, exploits available.
 - **Affected**: Product A, Product B
-- **MITRE**: T1190
+- **MITRE ATT&CK**: T1190: Exploit Public-Facing Application
+- **Threat Actors**: None known
+- **Bug Bounty**: None
+- **Recent News**: None
+- **Next Steps**: Patch systems, monitor logs
+- **Missing Data**: Threat actor details
 ---
 ```json
 {{
@@ -81,10 +90,10 @@ Example:
 """
             try:
                 response = self.client.completions.create(
-                    model="deepseek-ai/DeepSeek-V3",
+                    model="meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",  # Updated to Meta Llama model
                     prompt=prompt,
-                    max_tokens=1000,
-                    temperature=0.5  # Lower temperature for consistency
+                    max_tokens=1800,  # Increased for complete responses
+                    temperature=0.5
                 )
                 response_text = response.choices[0].text.strip()
                 log_info(f"Full API response: {response_text}")
@@ -94,12 +103,13 @@ Example:
                     summary, json_data = response_text.split("---", 1)
                     summary = summary.strip()
                     json_data = json_data.strip()
+                    log_info(f"Raw summary: {summary}")
                 except ValueError:
-                    log_error("No '---' separator found in response")
+                    log_error("No '---' separator found")
                     raise ValueError("Invalid response format")
 
                 # Extract JSON
-                json_match = re.search(r"```json\s*([\s\S]*?)\s*```", json_data, re.MULTILINE)
+                json_match = re.search(r'```json\s*\n([\s\S]*?)\n```', json_data, re.MULTILINE)
                 if json_match:
                     json_str = json_match.group(1).strip()
                 else:
@@ -128,14 +138,24 @@ Example:
                 }
                 mitre_data = table_data.get("mitre_techniques", []) if isinstance(table_data.get("mitre_techniques"), list) else []
 
-                # Ensure summary is non-empty
-                if not summary.strip().startswith("##"):
-                    log_error("Summary is incomplete")
-                    summary = f"## {query} Summary\n- **Description**: {nist_data['description']}\n- **Attack Vector**: Unknown\n- **Severity**: {nist_data['severity']}\n- **Affected**: {', '.join(nist_data['affected'])}"
+                # Ensure complete summary
+                if len(summary.split('\n')) < 10:  # Arbitrary threshold for incomplete summary
+                    log_error("Summary appears incomplete")
+                    summary = f"""## {query} Summary
+- **Description**: {nist_data['description']}. Attack vector: Unknown. Mitigation: Apply vendor patches.
+- **Severity**: {nist_data['severity']}, CVSS {nist_data['impact']}, Exploits: {nist_data['exploit_available']}.
+- **Affected**: {', '.join(nist_data['affected']) or 'None identified'}
+- **MITRE ATT&CK**: {', '.join([f"{t['id']}: {t['name']}" for t in mitre_data]) or 'None identified'}
+- **Threat Actors**: Unknown
+- **Bug Bounty**: None known
+- **Recent News**: Check vendor advisories
+- **Next Steps**: Patch systems, monitor for exploitation
+- **Missing Data**: Additional details at https://nvd.nist.gov/vuln/detail/{query}
+"""
 
             except Exception as e:
                 log_error(f"LLM query or parsing failed: {str(e)}")
-                # Fallback with minimal data
+                # Fallback
                 nist_data = {
                     "cve_id": query,
                     "description": f"Vulnerability details for {query} unavailable",
@@ -153,9 +173,12 @@ Example:
 - **Attack Vector**: Unknown.
 - **Severity**: Unknown; check NVD.
 - **Affected**: None identified.
-- **MITRE**: None identified.
-- **Mitigation**: Monitor NVD or vendor advisories.
-- **Note**: Comprehensive details missing. Visit https://nvd.nist.gov/vuln/detail/{query}.
+- **MITRE ATT&CK**: None identified.
+- **Threat Actors**: Unknown.
+- **Bug Bounty**: None known.
+- **Recent News**: None available.
+- **Next Steps**: Monitor NVD or vendor advisories.
+- **Missing Data**: Details at https://nvd.nist.gov/vuln/detail/{query}.
 """
 
             results = [Result(
@@ -178,5 +201,5 @@ Example:
 
 if __name__ == "__main__":
     agent = AgentBando()
-    response = agent.process_query("CVE-2024-6387")
+    response = agent.process_query("CVE-2025-30400")
     print(response)

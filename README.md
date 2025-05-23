@@ -1,27 +1,56 @@
-# Agent-Bando: Lightweight SOC Agent
+# Agent-Bando: Dynamic CVE Lookup Web App
 
-Agent-Bando is a super lightweight, chat-based Security Operations Center (SOC) agent designed for basic querying of vulnerability data from open-source databases like the NIST National Vulnerability Database (NVD). Built with Together AI for natural language processing and Flask for a user-friendly web interface, it delivers concise, actionable insights in a color-coded table format, highlighting severity and impact. Perfect for quick CVE lookups, Agent-Bando is simple, efficient, and extensible.
+**Agent-Bando** is a sleek and powerful Flask-based web application designed for Security Operations Centers (SOCs) to query Common Vulnerabilities and Exposures (CVEs) with ease. Powered by the meta-llama/Llama-4-Maverick api, Agent-Bando delivers dynamic tables and comprehensive summaries for CVEs like `CVE-2025-30400` and `CVE-2024-6387`, providing critical details such as severity, affected products, MITRE ATT&CK techniques, and actionable next steps.
+
+It has Dark Mode too 😆
+
+---
+
+![Agent-Bando Screenshot](templates/screenshots/img1.png) 
+
+![Agent-Bando Screenshot](templates/screenshots/img2.png) 
+<!-- Placeholder; replace with actual screenshot -->
 
 ## Features
-- **Query Vulnerabilities**: Fetch details for specific CVEs (e.g., `CVE-2023-41064`) or search by keywords (e.g., `Apache`).
-- **Color-Coded Table**: Displays CVE ID, description, severity, impact, and publication date with visual cues (e.g., red for Critical severity).
-- **LLM Summaries**: Generates clear, actionable summaries using Together AI's `deepseek-ai/DeepSeek-V3` $0.20 per 1 million tokens
-- **Lightweight & Extensible**: Modular design for easy integration of additional data sources (e.g., MITRE ATT&CK).
-- **Rate-Limit Friendly**: Handles NIST API limits with delays, no API key required for basic use.
 
-## Screenshots
-### Summary Output and Result Table
-![Summary of CVE-2023-41064](templates/screenshots/im2.png)
+- **Dynamic CVE Queries**: Enter a CVE ID (e.g., `CVE-2025-30400`) to instantly retrieve detailed vulnerability data.
+- **Interactive Table**: Displays key fields like `Severity`, `Impact`, `Exploitability`, `Affected Products`, and `MITRE Techniques`, with tooltips for affected products.
+- **Rich Summaries**: Generates Markdown-rendered summaries with:
+  - Vulnerability description and attack vector
+  - Severity and exploit details
+  - Affected products and vendors
+  - MITRE ATT&CK mappings
+  - Threat actors, bug bounties, recent news, and SOC next steps
+- **Llama-Powered**: Leverages the `meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8` model via Together API for real-time data extraction. (Feel free to use the Deepseek model too)
+- **Robust Fallback**: Gracefully handles API failures with minimal data and NVD links.
+- **Logging**: Detailed logs in `agent_bando.log` for debugging and monitoring.
 
+## Project Structure
 
-![Summary of CVE-2021-44228](templates/screenshots/im1.png)
+```
+agent-bando/
+├── agent.py              # Core logic: Processes CVE queries via DeepSeek API
+├── main.py               # Flask app: Serves the web UI
+├── templates/
+│   └── index.html        # UI: Renders table and summary
+├── static/
+│   └── style.css         # Styling: Table and summary formatting
+├── utils/
+│   └── logger.py         # Logging: Outputs to agent_bando.log
+├── .env                  # Config: Stores TOGETHER_API_KEY
+├── agent_bando.log       # Log file: Query and API response details
+└── requirements.txt      # Dependencies: together, python-dotenv
+```
 
+**Note**: Files in `integrations/` (e.g., `news.py`, `nist.py`, `mitre.py`, `scraper.py`) are not currently used, as the app relies on the DeepSeek API.
 
 ## Prerequisites
+
 - Python 3.8+
-- A Together AI API key (sign up at [together.ai](https://www.together.ai/))
+- A Together API key (sign up at [Together AI](https://www.together.ai/))
 
 ## Installation
+
 1. **Clone the Repository**:
    ```bash
    git clone https://github.com/your-username/agent-bando.git
@@ -41,40 +70,72 @@ Agent-Bando is a super lightweight, chat-based Security Operations Center (SOC) 
 
 4. **Configure Environment**:
    Create a `.env` file in the project root:
+   ```bash
+   echo "TOGETHER_API_KEY=your-together-api-key" > .env
    ```
-   TOGETHER_API_KEY=your_together_ai_key
-   ```
-   Replace `your_together_ai_key` with your Together AI API key (no quotes).
 
 ## Usage
-1. **Run the Application**:
+
+1. **Run the App**:
    ```bash
    python main.py
    ```
-   The app runs on `http://localhost:5001` (port 5001 avoids macOS ControlCenter conflicts).
 
-2. **Access the Web Interface**:
-   - Open `http://localhost:5001` in your browser.
-   - Enter a query (e.g., `Show CVE-2023-41064` or `Apache CVEs`).
-   - View the summary and color-coded table.
+2. **Access the Web UI**:
+   Open `http://localhost:5001` in your browser.
 
-3. **Example Queries**:
-   - `CVE-2023-41064`: Fetches details for a WebKit vulnerability.
-   - `Apache`: Searches for recent Apache-related CVEs.
-   - `T1234`: Placeholder for MITRE ATT&CK techniques (extendable).
+3. **Query CVEs**:
+   - Enter a CVE ID (e.g., `CVE-2025-30400`) in the search bar.
+   - View the dynamic table with fields like `Severity`, `Affected`, and `MITRE Techniques`.
+   - Read the detailed summary below, rendered as HTML with sections for description, mitigation, and SOC actions.
+   - Use the severity filter or export results to CSV.
+
+4. **Check Logs**:
+   Review `agent_bando.log` for query details, API responses, and errors.
+
+## Example Output
+
+**Query**: `CVE-2025-30400`
+
+**Table**:
+| ID             | Description                             | Severity | Impact  | Exploitability | Exploit Available | Published  | Affected                                    | MITRE Techniques                         |
+|----------------|-----------------------------------------|----------|---------|----------------|-------------------|------------|---------------------------------------------|------------------------------------------|
+| CVE-2025-30400 | Memory corruption in network packets... | **High** | **7.8** | 1.8            | **No**            | 2025-02-11 | Cisco IOS XE, Juniper Junos OS, Fortinet... | T1203: Exploitation for Client Execution |
+
+**Summary**:
+
+***CVE-2025-30400 Summary***
+- **Description**: Memory corruption vulnerability in network packets... Attack vector: Malformed packets. Mitigation: Apply vendor patches.
+- **Severity**: CVSS 7.8, no known exploits.
+- **Affected**: Cisco IOS XE, Juniper Junos OS, Fortinet FortiOS, ...
+- **MITRE ATT&CK**: T1203: Exploitation for Client Execution
+- **Threat Actors**: None known
+- **Bug Bounty**: None
+- **Recent News**: Vendor advisories issued
+- **Next Steps**: Patch systems, monitor network traffic
+- **Missing Data**: Threat actor details
+
 
 ## Troubleshooting
-- **Empty Table**: Check `agent_bando.log` for NIST API errors (e.g., 429 Rate Limit). Increase `time.sleep` in `nist.py` or add an API key.
-- **Port Conflict**: If port 5001 is in use, change to 5002 in `main.py` (`app.run(port=5002)`).
-- **LLM Errors**: Verify Together AI API key and credits at [together.ai](https://www.together.ai/).
 
-## Contributing
-Contributions are welcome! Please:
-1. Fork the repository.
-2. Create a feature branch (`git checkout -b feature-name`).
-3. Submit a pull request with clear descriptions.
+- **Incomplete Summaries**:
+  - Check `agent_bando.log` for `Full API response` and `Raw summary`.
+  - Ensure `TOGETHER_API_KEY` is valid in `.env`.
+  - Test API:
+    ```bash
+    python -c "from together import Together; client = Together(api_key='your_key'); print(client.completions.create(model='meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', prompt='For CVE-2025-30400, provide Markdown and JSON...', max_tokens=500).choices[0].text)"
+    ```
 
-## Acknowledgments
-- [NIST NVD](https://nvd.nist.gov/) for open-source CVE data.
-- [Together AI](https://www.together.ai/) for LLM capabilities.
-- [Flask](https://flask.palletsprojects.com/) for the web framework.
+- **Table Issues**:
+  - Log `Parsed table data` in `agent_bando.log` to verify JSON fields.
+  - Clear browser cache (`Ctrl+Shift+R`).
+
+- **Dependencies**:
+  - Reinstall:
+    ```bash
+    pip install together==1.4.6 python-dotenv==0.19.0 flask==2.2.5 markdown==3.4.1
+    ```.
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

@@ -42,7 +42,6 @@ agent-bando/
 └── requirements.txt      # Dependencies: together, python-dotenv
 ```
 
-**Note**: Files in `integrations/` (e.g., `news.py`, `nist.py`, `mitre.py`, `scraper.py`) are not currently used, as the app relies on the DeepSeek API.
 
 ## Prerequisites
 
